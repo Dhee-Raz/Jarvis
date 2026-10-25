@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JARVIS | Command Center</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="app">
+  <header><div class="brand"><span class="brand-icon">◈</span><strong>J.A.R.V.I.S.</strong><small>PERSONAL INTELLIGENCE SYSTEM</small></div><div class="status"><span class="light"></span> SYSTEM ONLINE <span id="clock"></span></div></header>
+  <main>
+    <section class="center">
+      <div class="eyebrow">NEURAL INTERFACE // MARK I</div>
+      <div class="orb-wrap"><div class="outer-ring"></div><div class="middle-ring"></div><div class="inner-ring"></div><div class="orb"><div class="orb-core">J</div></div></div>
+      <h1 id="state">AWAITING YOUR COMMAND</h1><p class="subtitle" id="hint">Voice, text, and gesture interfaces initialized.</p>
+      <div class="controls"><button id="voice" class="primary">◉ START LISTENING</button><button id="camera">◎ START CAMERA</button><button id="stop">■ STOP</button></div>
+    </section>
+    <aside class="panel chat"><div class="panel-title">◈ INTELLIGENCE LINK <span id="mode">READY</span></div><div id="messages" class="messages" aria-live="polite"><div class="message ai">Welcome. I am JARVIS. How may I assist you today?</div></div><form id="chatForm"><input id="prompt" autocomplete="off" maxlength="2500" placeholder="Ask JARVIS anything..." aria-label="Your message"><button type="submit" aria-label="Send">➤</button></form></aside>
+    <aside class="panel actions"><div class="panel-title">⌘ MAC CONTROLS <span>APPROVAL REQUIRED</span></div><p>Choose an approved application. Every action needs your confirmation.</p><select id="appChoice"><option value="Safari">Safari</option><option value="Notes">Notes</option><option value="Calculator">Calculator</option><option value="Calendar">Calendar</option><option value="Finder">Finder</option><option value="Terminal">Terminal</option><option value="Music">Music</option><option value="Messages">Messages</option><option value="Reminders">Reminders</option></select><button id="openApp">OPEN SELECTED APP</button><label for="url">Open HTTPS website</label><input id="url" placeholder="https://example.com"><button id="openUrl">OPEN WEBSITE</button><div class="panel-title camera-title">◎ VISION SYSTEM <span id="gesture">OFFLINE</span></div><video id="video" playsinline autoplay muted></video><canvas id="landmarks"></canvas><p class="micro">Open palm: halt · Thumb up: greet · Pinch: toggle speech</p></aside>
+  </main>
+  <footer><span>JARVIS v0.1 • LOCAL MAC BRIDGE</span><span>NO UNRESTRICTED SYSTEM ACCESS</span></footer>
+</div>
+<script type="module" src="/static/app.js"></script>
+</body></html>
