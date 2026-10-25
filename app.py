@@ -3,6 +3,7 @@ import os
 import re
 import subprocess
 import json
+import logging
 import time
 from pathlib import Path
 from urllib.parse import urlparse
@@ -13,12 +14,14 @@ from flask import Flask, jsonify, render_template, request
 load_dotenv()
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 1_000_000
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 APPROVED_APPS = {
     "safari": "Safari", "notes": "Notes", "calculator": "Calculator",
     "calendar": "Calendar", "terminal": "Terminal", "finder": "Finder",
     "music": "Music", "messages": "Messages", "reminders": "Reminders",
 }
 MEMORY_FILE = Path(__file__).with_name("jarvis_memory.json")
+RATE_LIMIT = {}
 # The bridge does not provide generic shell, filesystem, or AppleScript execution.
 
 @app.after_request
@@ -41,6 +44,12 @@ def restrict_origin():
     if host not in ("127.0.0.1", "localhost"):
         return jsonify(error="Local-only service"), 403
     if request.method == "POST":
+        now = time.time()
+        recent = [stamp for stamp in RATE_LIMIT.get(request.remote_addr, []) if now - stamp < 60]
+        if len(recent) >= 60:
+            return jsonify(error="Too many requests. Try again shortly."), 429
+        recent.append(now)
+        RATE_LIMIT[request.remote_addr] = recent
         origin = request.headers.get("Origin", "")
         if origin not in ("http://127.0.0.1:8765", "http://localhost:8765",
                           f"http://127.0.0.1:{os.getenv('JARVIS_PORT', '8765')}",
@@ -91,6 +100,40 @@ def gemini_reply(message, image=None, history=None):
     if not reply:
         raise ValueError("Gemini returned an empty response")
     return reply
+
+def run_macos_script(script, *values):
+    if os.uname().sysname != "Darwin":
+        raise RuntimeError("macOS integration is only available on macOS")
+    result = subprocess.run(
+        ["osascript", "-e", script, "--", *values],
+        capture_output=True, text=True, timeout=10, check=False
+    )
+    if result.returncode:
+        raise RuntimeError("macOS action failed")
+    return result.stdout.strip()
+
+def run_macos_app(app_name):
+    if app_name not in {"Notes", "Reminders", "Calendar", "Music"}:
+        raise ValueError("Application is not approved")
+    subprocess.Popen(["open", "-a", app_name])
+
+def create_note(value):
+    run_macos_script(
+        'on run argv\n tell application "Notes" to make new note at folder "Notes" with properties {body:item 1 of argv}\nend run',
+        value,
+    )
+
+def create_reminder(value):
+    run_macos_script(
+        'on run argv\n tell application "Reminders" to make new reminder with properties {name:item 1 of argv}\nend run',
+        value,
+    )
+
+def create_calendar_event(value):
+    run_macos_script(
+        'on run argv\n tell application "Calendar" to tell calendar "Calendar" to make new event with properties {summary:item 1 of argv, start date:(current date), end date:((current date) + 3600)}\nend tell\nend run',
+        value,
+    )
 
 def ollama_reply(message, image=None, history=None):
     import requests
@@ -145,6 +188,7 @@ def diagnostics():
         ollama=True,
         battery=battery,
         timestamp=int(time.time()),
+        vision_mode=os.getenv("VISION_MODE", "cloud-preferred"),
     )
 
 @app.get("/api/dashboard")
@@ -158,6 +202,41 @@ def dashboard():
         memory=len(read_memory()),
         timestamp=int(time.time()),
     )
+
+@app.get("/api/weather")
+def weather():
+    import requests
+    latitude = os.getenv("WEATHER_LATITUDE")
+    longitude = os.getenv("WEATHER_LONGITUDE")
+    if not latitude or not longitude:
+        return jsonify(error="Set WEATHER_LATITUDE and WEATHER_LONGITUDE in .env"), 503
+    response = requests.get(
+        "https://api.open-meteo.com/v1/forecast",
+        params={"latitude": latitude, "longitude": longitude, "current": "temperature_2m,weather_code,wind_speed_10m"},
+        timeout=8,
+    )
+    response.raise_for_status()
+    return jsonify(response.json().get("current", {}))
+
+@app.get("/api/calendar")
+def calendar_events():
+    events = run_macos_script(
+        'tell application "Calendar" to tell calendar "Calendar" to get summary of every event whose start date is greater than or equal to (current date)',
+    )
+    return jsonify(events=[item.strip() for item in events.split(",") if item.strip()])
+
+@app.post("/api/music")
+def music():
+    action_name = (request.get_json(silent=True) or {}).get("action")
+    scripts = {
+        "play": 'tell application "Music" to play',
+        "pause": 'tell application "Music" to pause',
+        "next": 'tell application "Music" to next track',
+    }
+    if action_name not in scripts:
+        return jsonify(error="Unsupported music action"), 400
+    run_macos_script(scripts[action_name])
+    return jsonify(message=f"Music action '{action_name}' completed.")
 
 def read_memory():
     try:
@@ -209,6 +288,7 @@ def chat():
     message = str(body.get("message", "")).strip()[:2500]
     history = body.get("history", [])
     memory = body.get("memory", [])
+    vision_mode = os.getenv("VISION_MODE", "cloud-preferred")
     personality = str(body.get("personality", "professional")).strip().lower()
     image = body.get("image")
     if image is not None:
@@ -243,6 +323,12 @@ def chat():
         and isinstance(item.get("content"), str) and len(item["content"]) <= 2500
     ]
     errors = []
+    if image and vision_mode == "local-only":
+        try:
+            return jsonify(reply=ollama_reply(message, image, history), mode="OLLAMA LOCAL VISION")
+        except Exception as exc:
+            app.logger.warning("Local vision request failed: %s", type(exc).__name__)
+            return jsonify(error="Local vision provider is unavailable."), 503
     if os.getenv("GEMINI_API_KEY", "").strip():
         try:
             return jsonify(reply=gemini_reply(message, image, [
@@ -292,13 +378,24 @@ def action():
             subprocess.Popen(["open", "-a", "Clock"])
             return jsonify(message=f"Opened Clock for a {seconds}-second timer.")
     if kind == "note" and 1 <= len(value) <= 500:
-        subprocess.Popen(["open", "-a", "Notes"])
-        return jsonify(message="Opened Notes. Please paste the approved note content manually.")
+        if not request.get_json(silent=True).get("confirmed"):
+            return jsonify(error="Confirmation required"), 409
+        create_note(value)
+        return jsonify(message="Created the approved note in Notes.")
     if kind in {"reminder", "calendar"} and 1 <= len(value) <= 500:
-        app_name = "Reminders" if kind == "reminder" else "Calendar"
-        subprocess.Popen(["open", "-a", app_name])
-        return jsonify(message=f"Opened {app_name}. Please review and enter the approved item manually.")
+        if not request.get_json(silent=True).get("confirmed"):
+            return jsonify(error="Confirmation required"), 409
+        if kind == "reminder":
+            create_reminder(value)
+        else:
+            create_calendar_event(value)
+        return jsonify(message=f"Created the approved {kind}.")
     return jsonify(error="Action not allowlisted"), 403
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=int(os.getenv("JARVIS_PORT", "8765")), debug=False)
+    port = int(os.getenv("JARVIS_PORT", "8765"))
+    if os.getenv("JARVIS_PRODUCTION", "").lower() == "true":
+        from waitress import serve
+        serve(app, host="127.0.0.1", port=port, threads=4)
+    else:
+        app.run(host="127.0.0.1", port=port, debug=False)
