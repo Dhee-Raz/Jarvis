@@ -1,6 +1,6 @@
 const $ = id => document.getElementById(id);
 const messages = $("messages"), state = $("state"), hint = $("hint");
-let recognition, listening = false, wakeWordEnabled = false, awaitingCommand = false, cameraStream, detector, cameraLoop, frameCapture, latestFrame = null, gestureCooldown = 0, speechOn = true, conversationHistory = [], memoryItems = [], activeRequest, timers = [];
+let recognition, listening = false, wakeWordEnabled = false, awaitingCommand = false, cameraStream, detector, cameraLoop, frameCapture, latestFrame = null, captureRequested = false, gestureCooldown = 0, speechOn = true, conversationHistory = [], memoryItems = [], activeRequest, timers = [], lastReply = "";
 const setState = (title, sub) => { state.textContent = title; hint.textContent = sub; };
 const addMessage = (text, kind) => { const div = document.createElement("div"); div.className = "message " + kind; div.textContent = text; messages.append(div); messages.scrollTop = messages.scrollHeight; };
 function speak(text) {
@@ -27,10 +27,12 @@ function wakeCommand(transcript) {
 async function sendMessage(text) {
   text = text.trim(); if (!text) return;
   const remember=text.match(/^remember(?: that)?\s+(.+)/i);
-  if (remember) { await saveMemory(remember[1]); return; }
+  if (remember) { await saveMemory(remember[1], "fact"); return; }
   if (/^(forget|clear) (my )?memory$/i.test(text)) { await clearMemory(); return; }
+  if (/^(please )?repeat( that)?$/i.test(text)) { if (lastReply) speak(lastReply); return; }
   const timer=text.match(/^set (?:a )?timer for (\d+)\s*(seconds?|minutes?|hours?)$/i);
   if (timer) { startTimer(Number(timer[1]), timer[2]); return; }
+  if (/^(cancel|stop) (the )?(current )?timer$/i.test(text)) { cancelTimer(); return; }
   const macAction=text.match(/^(?:open|create|add)\s+(?:a\s+)?(note|reminder|calendar event)\b(?:[:\s]+(.+))?$/i);
   if (macAction) {
     const type=/reminder/i.test(macAction[1])?"reminder":/calendar/i.test(macAction[1])?"calendar":"note";
@@ -40,13 +42,15 @@ async function sendMessage(text) {
   addMessage(text, "user"); setState("PROCESSING REQUEST", "Consulting intelligence core...");
   try {
     const body={message:text, history:conversationHistory.slice(-12), memory:memoryItems.map(item=>item.value), personality:$("personality").value};
-    if (latestFrame) body.image=latestFrame;
+    const visualQuestion=/\b(what do you see|what am i holding|describe (this|the) (image|scene|room)|read (this|that|the text)|what is in front of me|analy[sz]e the frame)\b/i.test(text);
+    if (latestFrame && (captureRequested || visualQuestion)) body.image=latestFrame;
+    captureRequested=false;
     activeRequest=new AbortController();
     const r = await fetch("/api/chat", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),signal:activeRequest.signal});
     const data = await r.json(); if (!r.ok) throw Error(data.error || "Request failed");
     conversationHistory.push({role:"user",content:text},{role:"assistant",content:data.reply});
     conversationHistory=conversationHistory.slice(-12);
-    addMessage(data.reply,"ai"); $("mode").textContent=data.mode; speak(data.reply); setState("SYSTEM ONLINE", "Awaiting your next command.");
+    lastReply=data.reply; addMessage(data.reply,"ai"); $("mode").textContent=data.mode; speak(data.reply); setState("SYSTEM ONLINE", "Awaiting your next command.");
   } catch(e) {if(e.name!=="AbortError"){addMessage(e.message,"ai");setState("CONNECTION ERROR","Check the local server.");}}
   finally {activeRequest=null;}
 }
@@ -59,7 +63,9 @@ if (SpeechRecognition) {
   recognition.onresult=e=>{
     for (let i=e.resultIndex; i<e.results.length; i++) {
       const result=e.results[i], transcript=result[0]?.transcript?.trim();
+      if (transcript && !result?.isFinal) $("heard").textContent=`Hearing: ${transcript}`;
       if (!result?.isFinal || !transcript) continue;
+      $("heard").textContent=`Heard: ${transcript}`;
       const command=wakeCommand(transcript);
       if (!awaitingCommand && command !== null) {
         awaitingCommand=true;
@@ -114,13 +120,23 @@ $("voice").onclick=()=>{
 };
 $("stop").onclick=()=>{wakeWordEnabled=false;awaitingCommand=false;recognition?.stop();speechSynthesis?.cancel();activeRequest?.abort();setState("SYSTEM HALTED","Waiting for your next instruction.");};
 $("quiet").onclick=()=>{speechSynthesis?.cancel();setState("VOICE SILENCED","JARVIS will remain available for your next instruction.");};
+$("analyzeFrame").onclick=()=>{if(!latestFrame){setState("CAMERA REQUIRED","Start the camera before analyzing a frame.");return;}captureRequested=true;$("prompt").value="Describe what you see in the current camera frame."; $("chatForm").requestSubmit();};
 async function updateDiagnostics() {
   try {
-    const r=await fetch("/api/diagnostics"); const data=await r.json();
-    $("diagnostics").textContent=`AI: ${data.provider.toUpperCase()} • GEMINI: ${data.gemini?"READY":"OFF"} • CAMERA: LOCAL ONLY`;
-  } catch (e) { $("diagnostics").textContent="DIAGNOSTICS UNAVAILABLE"; }
+    const r=await fetch("/api/dashboard"); const data=await r.json();
+    $("dashboard").firstElementChild.textContent=`AI: ${data.provider.toUpperCase()}`;
+    $("networkStatus").textContent=`NETWORK: ${navigator.onLine?"ONLINE":"OFFLINE"}`;
+  } catch (e) { $("dashboard").firstElementChild.textContent="AI: UNAVAILABLE"; }
+  $("micStatus").textContent=`MIC: ${recognition ? "READY" : "UNAVAILABLE"}`;
+  $("cameraStatus").textContent=`CAMERA: ${cameraStream ? "ON" : "OFF"}`;
 }
-updateDiagnostics(); setInterval(updateDiagnostics,30000);
+async function updateBattery() {
+  if (!navigator.getBattery) { $("batteryStatus").textContent="BATTERY: N/A"; return; }
+  const battery=await navigator.getBattery();
+  const render=()=>$("batteryStatus").textContent=`BATTERY: ${Math.round(battery.level*100)}%`;
+  render(); battery.addEventListener("levelchange",render);
+}
+updateDiagnostics(); updateBattery(); window.addEventListener("online",updateDiagnostics); window.addEventListener("offline",updateDiagnostics); setInterval(updateDiagnostics,30000);
 if (recognition) window.addEventListener("load",startWakeWordListening);
 async function performAction(type,value) {
   if (!value) return;
@@ -141,17 +157,21 @@ function startTimer(amount, unit) {
   timer.id=setTimeout(()=>{addMessage(`Timer complete: ${timer.label}.`,"ai");speak(`Your ${timer.label} timer is complete.`);timers=timers.filter(item=>item!==timer);},seconds*1000);
   timers.push(timer); addMessage(`Timer set for ${timer.label}.`,"ai");
 }
-async function saveMemory(value) {
+function cancelTimer() {
+  if (!timers.length) { addMessage("There are no active timers.","ai"); return; }
+  timers.forEach(timer=>clearTimeout(timer.id)); timers=[]; addMessage("All active timers have been cancelled.","ai");
+}
+async function saveMemory(value, category=$("memoryCategory").value) {
   try {
-    const r=await fetch("/api/memory",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({value})});
+    const r=await fetch("/api/memory",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({value,category})});
     const data=await r.json(); if(!r.ok) throw Error(data.error);
-    addMessage(data.message,"ai"); $("memoryInput").value=""; $("memoryStatus").textContent=`${data.items.length} local memory item(s) stored.`;
+    memoryItems=data.items; addMessage(data.message,"ai"); $("memoryInput").value=""; renderMemory();
   } catch(e) { addMessage("Memory failed: "+e.message,"ai"); }
 }
 async function clearMemory() {
   try {
     const r=await fetch("/api/memory",{method:"DELETE"}); const data=await r.json();
-    if(!r.ok) throw Error(data.error); memoryItems=[]; addMessage(data.message,"ai"); $("memoryStatus").textContent="No memory loaded.";
+    if(!r.ok) throw Error(data.error); memoryItems=[]; addMessage(data.message,"ai"); renderMemory();
   } catch(e) { addMessage("Memory failed: "+e.message,"ai"); }
 }
 $("saveMemory").onclick=()=>{const value=$("memoryInput").value.trim();if(value)saveMemory(value);};
@@ -159,8 +179,18 @@ $("clearMemory").onclick=()=>{if(confirm("Clear all locally stored memory?"))cle
 async function loadMemory() {
   try {
     const r=await fetch("/api/memory"); const data=await r.json(); if(!r.ok) throw Error(data.error);
-    memoryItems=data.items || []; $("memoryStatus").textContent=memoryItems.length ? `${memoryItems.length} local memory item(s) stored.` : "No memory loaded.";
+    memoryItems=data.items || []; renderMemory();
   } catch(e) { $("memoryStatus").textContent="Memory unavailable."; }
+}
+function renderMemory() {
+  $("memoryStatus").textContent=memoryItems.length ? `${memoryItems.length} local memory item(s) stored.` : "No memory loaded.";
+  $("memoryList").replaceChildren(...memoryItems.map((item,index)=>{
+    const row=document.createElement("div"); row.className="memory-item";
+    row.textContent=`${item.category || "fact"}: ${item.value}`;
+    const remove=document.createElement("button"); remove.textContent="×"; remove.title="Delete memory";
+    remove.onclick=async()=>{const r=await fetch(`/api/memory/${index}`,{method:"DELETE"});if(r.ok){memoryItems=(await r.json()).items;renderMemory();}};
+    row.append(remove); return row;
+  }));
 }
 loadMemory();
 async function startCamera() {
@@ -168,7 +198,7 @@ async function startCamera() {
   try{
     const video=$("video");
     cameraStream=await navigator.mediaDevices.getUserMedia({video:{width:{ideal:640},height:{ideal:360},facingMode:"user"},audio:false});
-    video.srcObject=cameraStream; await video.play(); $("camera").textContent="◎ STOP CAMERA";$("gesture").textContent="STARTING";$("cameraPrivacy").textContent="Camera active. Latest frame may be shared with your question.";
+    video.srcObject=cameraStream; await video.play(); $("camera").textContent="◎ STOP CAMERA";$("gesture").textContent="STARTING";$("cameraPrivacy").textContent="Camera active. A frame is shared only for visual questions or Analyze Frame.";
     const canvas=$("landmarks");
     canvas.width=video.videoWidth || 640; canvas.height=video.videoHeight || 360;
     frameCapture=setInterval(()=>{

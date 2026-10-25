@@ -41,8 +41,12 @@ Open http://127.0.0.1:8765 and send a message. Use `http://127.0.0.1:8765/api/st
 
 - Futuristic dashboard, text chat and spoken answers
 - Browser speech recognition (browser support varies)
-- Webcam hand tracking using MediaPipe CDN (internet required for initial library/model load)
-- Explicitly confirmed, allowlisted macOS application and HTTPS URL opening
+- Wake words: “Hey Jarvis”, “Jarvis”, “Hey Buddy”, and “Buddy”
+- Conversation context, repeat/quiet controls, and response styles
+- Webcam hand tracking and explicit camera-frame analysis using MediaPipe
+- Local, categorized, individually removable memory
+- Provider, camera, microphone, battery, and network dashboard status
+- Confirmed timers and allowlisted macOS application, Notes, Reminders, Calendar, and HTTPS URL opening
 
 ### Limitations and security
 
@@ -51,4 +55,17 @@ Open http://127.0.0.1:8765 and send a message. Use `http://127.0.0.1:8765/api/st
 - Fallback is triggered by provider failure; it does not automatically detect all connectivity states.
 - JARVIS does not execute arbitrary shell commands, silently control your Mac, or have root access.
 - Browser speech recognition may send audio to a browser provider, even when the AI model is local.
+- Camera frames are shared only for visual questions or when **Analyze Frame** is selected.
+- JARVIS does not identify people from camera frames and does not infer sensitive personal information.
 - Never commit `.env` or API keys. The service binds only to localhost.
+
+### Example commands
+
+- “Set a timer for five minutes.”
+- “Cancel the current timer.”
+- “Remember that I prefer concise answers.”
+- “Forget my memory.”
+- “Repeat that.”
+- “What do you see?” (with the camera running)
+- “Read the text in front of me.” (with the camera running)
+- “Create a reminder: call the dentist.” (requires confirmation)

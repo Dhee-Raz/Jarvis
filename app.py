@@ -74,6 +74,7 @@ def gemini_reply(message, image=None, history=None):
     parts = [{"text": message}]
     if image:
         parts.append({"inline_data": {"mime_type": "image/jpeg", "data": image}})
+        parts[0]["text"] += "\nAnalyze the provided frame. If text is visible, transcribe it accurately. Do not identify people."
     contents = history or [{"role": "user", "parts": parts}]
     if history:
         contents.append({"role": "user", "parts": parts})
@@ -146,6 +147,18 @@ def diagnostics():
         timestamp=int(time.time()),
     )
 
+@app.get("/api/dashboard")
+def dashboard():
+    return jsonify(
+        service="online",
+        provider=os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
+        if os.getenv("GEMINI_API_KEY", "").strip()
+        else os.getenv("OLLAMA_MODEL", "llama3.2"),
+        camera="browser-controlled",
+        memory=len(read_memory()),
+        timestamp=int(time.time()),
+    )
+
 def read_memory():
     try:
         with MEMORY_FILE.open(encoding="utf-8") as file:
@@ -164,13 +177,26 @@ def get_memory():
 
 @app.post("/api/memory")
 def add_memory():
-    value = str((request.get_json(silent=True) or {}).get("value", "")).strip()
+    body = request.get_json(silent=True) or {}
+    value = str(body.get("value", "")).strip()
+    category = str(body.get("category", "fact")).strip().lower()
     if not value or len(value) > 500:
         return jsonify(error="Memory must be between 1 and 500 characters"), 400
+    if category not in {"fact", "preference", "task"}:
+        return jsonify(error="Invalid memory category"), 400
     items = read_memory()
-    items.append({"value": value, "created": int(time.time())})
+    items.append({"value": value, "category": category, "created": int(time.time())})
     write_memory(items)
     return jsonify(message="Memory saved locally.", items=items)
+
+@app.delete("/api/memory/<int:index>")
+def delete_memory(index):
+    items = read_memory()
+    if index < 0 or index >= len(items):
+        return jsonify(error="Memory item not found"), 404
+    items.pop(index)
+    write_memory(items)
+    return jsonify(message="Memory item deleted.", items=items)
 
 @app.delete("/api/memory")
 def clear_memory():
@@ -194,6 +220,14 @@ def chat():
     if not message:
         return jsonify(error="Empty message"), 400
     if not isinstance(history, list) or len(history) > 12:
+        return jsonify(error="Invalid conversation history"), 400
+    if any(
+        not isinstance(item, dict)
+        or item.get("role") not in {"user", "assistant"}
+        or not isinstance(item.get("content"), str)
+        or len(item["content"]) > 2500
+        for item in history
+    ):
         return jsonify(error="Invalid conversation history"), 400
     if not isinstance(memory, list) or len(memory) > 20:
         return jsonify(error="Invalid memory"), 400
