@@ -131,6 +131,19 @@ class JarvisApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["temperature_2m"], 21)
 
+    @patch.object(app, "gemini_reply", return_value="Welcome back.")
+    def test_gemini_history_uses_model_role(self, gemini_reply):
+        with patch.dict(app.os.environ, {"GEMINI_API_KEY": "configured"}):
+            response = self.post_json("/api/chat", {
+                "message": "Continue", "history": [
+                    {"role": "user", "content": "Hello"},
+                    {"role": "assistant", "content": "Welcome"},
+                ],
+            })
+        self.assertEqual(response.status_code, 200)
+        history = gemini_reply.call_args.args[2]
+        self.assertEqual([item["role"] for item in history], ["user", "model"])
+
     @patch.object(app, "ollama_reply", return_value="Local scene")
     def test_local_only_vision_skips_cloud_provider(self, ollama_reply):
         image = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/"

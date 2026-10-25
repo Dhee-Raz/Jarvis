@@ -13,6 +13,8 @@ from flask import Flask, jsonify, render_template, request
 
 load_dotenv()
 app = Flask(__name__)
+# Keep local template edits synchronized with the JavaScript served on refresh.
+app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.config["MAX_CONTENT_LENGTH"] = 1_000_000
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 APPROVED_APPS = {
@@ -332,7 +334,8 @@ def chat():
     if os.getenv("GEMINI_API_KEY", "").strip():
         try:
             return jsonify(reply=gemini_reply(message, image, [
-                {"role": item["role"], "parts": [{"text": item["content"]}]}
+                {"role": "model" if item["role"] == "assistant" else "user",
+                 "parts": [{"text": item["content"]}]}
                 for item in history
             ]), mode="GEMINI")
         except Exception as exc:

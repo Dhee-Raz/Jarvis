@@ -43,7 +43,10 @@ Open http://127.0.0.1:8765 and send a message. Use `http://127.0.0.1:8765/api/st
 - Browser speech recognition (browser support varies)
 - Wake words: “Hey Jarvis”, “Jarvis”, “Hey Buddy”, and “Buddy”
 - Conversation context, repeat/quiet controls, and response styles
-- Webcam hand tracking and explicit camera-frame analysis using MediaPipe
+- Opening the camera starts automatic scene and activity observations from periodic snapshots; optional hand tracking uses MediaPipe
+- Live Vision shows the latest observation, Pause/Resume analysis, and optional spoken updates
+- **Use live camera in my questions** attaches a freshly captured frame to each typed or spoken question while the camera is open, including follow-ups. Turn it off to use text-only chat; Analyze Frame still shares a frame explicitly.
+- Automatic analysis waits eight seconds after each response, pauses in hidden tabs, and defers to foreground chat
 - Local, categorized, individually removable memory
 - Provider, camera, microphone, battery, and network dashboard status
 - Confirmed timers and allowlisted macOS application, Notes, Reminders, Calendar, and HTTPS URL opening
@@ -58,7 +61,8 @@ Open http://127.0.0.1:8765 and send a message. Use `http://127.0.0.1:8765/api/st
 - Fallback is triggered by provider failure; it does not automatically detect all connectivity states.
 - JARVIS does not execute arbitrary shell commands, silently control your Mac, or have root access.
 - Browser speech recognition may send audio to a browser provider, even when the AI model is local.
-- Camera frames are shared only for visual questions or when **Analyze Frame** is selected.
+- Opening the camera enables automatic frame sharing with the configured vision provider (Gemini may process frames in the cloud; `VISION_MODE=local-only` uses Ollama). **Pause analysis** stops background sharing while keeping the preview available. Camera frames still accompany questions when **Use live camera in my questions** is enabled. **Stop Camera** or **Stop** ends capture and cancels pending analysis.
+- Vision analyzes periodic snapshots, not continuous motion. Observations can be delayed or mistaken; use a direct visual question for a specific detail.
 - JARVIS does not identify people from camera frames and does not infer sensitive personal information.
 - Never commit `.env` or API keys. The service binds only to localhost.
 
