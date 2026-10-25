@@ -130,25 +130,39 @@ async function updateDiagnostics() {
   $("micStatus").textContent=`MIC: ${recognition ? "READY" : "UNAVAILABLE"}`;
   $("cameraStatus").textContent=`CAMERA: ${cameraStream ? "ON" : "OFF"}`;
 }
+async function updateWeather() {
+  try {
+    const r=await fetch("/api/weather"); if(!r.ok) throw Error();
+    const data=await r.json(); $("weatherStatus").textContent=`WEATHER: ${data.temperature_2m}°C`;
+  } catch (e) { $("weatherStatus").textContent="WEATHER: N/A"; }
+}
 async function updateBattery() {
   if (!navigator.getBattery) { $("batteryStatus").textContent="BATTERY: N/A"; return; }
   const battery=await navigator.getBattery();
   const render=()=>$("batteryStatus").textContent=`BATTERY: ${Math.round(battery.level*100)}%`;
   render(); battery.addEventListener("levelchange",render);
 }
-updateDiagnostics(); updateBattery(); window.addEventListener("online",updateDiagnostics); window.addEventListener("offline",updateDiagnostics); setInterval(updateDiagnostics,30000);
+updateDiagnostics(); updateBattery(); updateWeather(); window.addEventListener("online",updateDiagnostics); window.addEventListener("offline",updateDiagnostics); setInterval(updateDiagnostics,30000); setInterval(updateWeather,600000);
 if (recognition) window.addEventListener("load",startWakeWordListening);
 async function performAction(type,value) {
   if (!value) return;
   if (!window.confirm("Allow JARVIS to "+(type==="app"?"open application: ":"open website: ")+value+"?")) return;
   try {
-    const r=await fetch("/api/action",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type,value})});
+    const r=await fetch("/api/action",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type,value,confirmed:true})});
     const data=await r.json();if(!r.ok)throw Error(data.error);
     addMessage(data.message,"ai");
   } catch(e){addMessage("Action failed: "+e.message,"ai");}
 }
 $("openApp").onclick=()=>performAction("app",$("appChoice").value);
 $("openUrl").onclick=()=>performAction("url",$("url").value.trim());
+async function useMusic(action) {
+  if (!confirm(`Allow Music to ${action}?`)) return;
+  const r=await fetch("/api/music",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action})});
+  const data=await r.json(); addMessage(data.message || data.error,"ai");
+}
+$("musicPlay").onclick=()=>useMusic("play");
+$("musicPause").onclick=()=>useMusic("pause");
+$("musicNext").onclick=()=>useMusic("next");
 function startTimer(amount, unit) {
   const multiplier=/hour/i.test(unit)?3600:/minute/i.test(unit)?60:1;
   const seconds=amount*multiplier;

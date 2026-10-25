@@ -47,6 +47,9 @@ Open http://127.0.0.1:8765 and send a message. Use `http://127.0.0.1:8765/api/st
 - Local, categorized, individually removable memory
 - Provider, camera, microphone, battery, and network dashboard status
 - Confirmed timers and allowlisted macOS application, Notes, Reminders, Calendar, and HTTPS URL opening
+- Optional local-only vision mode with `VISION_MODE=local-only`
+- Optional production WSGI serving with `JARVIS_PRODUCTION=true`
+- Optional weather status using `WEATHER_LATITUDE` and `WEATHER_LONGITUDE`
 
 ### Limitations and security
 
@@ -69,3 +72,10 @@ Open http://127.0.0.1:8765 and send a message. Use `http://127.0.0.1:8765/api/st
 - “What do you see?” (with the camera running)
 - “Read the text in front of me.” (with the camera running)
 - “Create a reminder: call the dentist.” (requires confirmation)
+- “Pause the music.” (requires confirmation)
+
+For production-style local serving:
+
+```bash
+JARVIS_PRODUCTION=true python3 app.py
+```
